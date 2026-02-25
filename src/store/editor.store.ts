@@ -1,265 +1,504 @@
-// Venue Plan Creator — Zustand editor store
-// Tüm canvas state, seçim, tool ve kategori yönetimi burada.
+// Editor'ün merkezi state yönetimi — Zustand + Immer
+// Tüm canvas, tool ve venue verisi burada yaşar
 
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
+import { subscribeWithSelector } from 'zustand/middleware'
 import { nanoid } from 'nanoid'
 import type {
   VenueChart,
   VenueType,
   ToolType,
-  Category,
-  Row,
-  Seat,
   Floor,
+  ChartObject,
+  Category,
+  Viewport,
+  EditingContext,
 } from './types'
+import { DEFAULT_ROW_SPACING, DEFAULT_SEAT_SPACING, MAX_HISTORY_SIZE } from '@/lib/constants'
 
-// ---------------------------------------------------------------------------
-// State tipi
-// ---------------------------------------------------------------------------
+// --- State Tipi ---
 
 interface EditorState {
   chart: VenueChart | null
-  activeTool: ToolType
   activeFloorId: string | null
-  selectedObjectIds: string[]   // Row / nesne id'leri
-  selectedSeatIds: string[]     // Tek koltuk seçimi (Select Seats Tool)
-  viewport: { x: number; y: number; scale: number }
+  activeTool: ToolType
+  previousTool: ToolType | null
+  selectedObjectIds: string[]
+  selectedSeatIds: string[]
+  viewport: Viewport
+  isGridVisible: boolean
+  isSnapEnabled: boolean
+  editingContext: EditingContext
+  history: VenueChart[]
+  historyIndex: number
+  isPanning: boolean
+  rowToolSettings: RowToolSettings
 }
 
-// ---------------------------------------------------------------------------
-// Actions tipi
-// ---------------------------------------------------------------------------
+export interface RowToolSettings {
+  seatSpacing: number
+  rowSpacing:  number
+}
+
+// --- Action Tipi ---
 
 interface EditorActions {
-  // Temel
   initChart: (venueType: VenueType) => void
-  setActiveTool: (tool: ToolType) => void
+  setChartName: (name: string) => void
 
-  // Seçim
+  addFloor: () => void
+  setActiveFloor: (floorId: string) => void
+  removeFloor: (floorId: string) => void
+  renameFloor: (floorId: string, label: string) => void
+
+  addObject: (object: ChartObject) => void
+  updateObject: (id: string, updates: Partial<ChartObject>) => void
+  removeObject: (id: string) => void
+  removeSelectedObjects: () => void
+
   selectObjects: (ids: string[]) => void
+  selectSeats: (ids: string[]) => void
   clearSelection: () => void
 
-  // Row CRUD
-  addRow: (row: Row) => void
-  updateRow: (rowId: string, patch: Partial<Omit<Row, 'id' | 'type'>>) => void
-  removeRows: (rowIds: string[]) => void
+  setActiveTool: (tool: ToolType) => void
+  setTemporaryTool: (tool: ToolType) => void
+  restorePreviousTool: () => void
 
-  // Koltuk güncelleme (tek veya çoklu)
-  updateSeats: (
-    seatIds: string[],
-    patch: Partial<Pick<Seat, 'categoryIds' | 'accessible' | 'restrictedView' | 'label'>>,
-  ) => void
+  setViewport: (viewport: Viewport) => void
+  toggleGrid: () => void
+  toggleSnap: () => void
+  setIsPanning: (value: boolean) => void
+  setRowToolSettings: (patch: Partial<RowToolSettings>) => void
 
-  // Category CRUD
-  addCategory: (label: string) => Category
-  updateCategory: (categoryId: string, patch: Partial<Omit<Category, 'id'>>) => void
-  removeCategory: (categoryId: string) => void
-  reorderCategories: (orderedIds: string[]) => void
+  enterSectionContext: (sectionId: string, floorId: string) => void
+  exitSectionContext: () => void
 
-  // Seçili row'ların koltukları için kategori ata
-  assignCategoryToSelectedRows: (categoryId: string) => void
-  removeCategoryFromSelectedRows: (categoryId: string) => void
+  addCategory: (label: string, color: string) => void
+  updateCategory: (id: string, updates: Partial<Category>) => void
+  removeCategory: (id: string) => void
+
+  undo: () => void
+  redo: () => void
+  pushHistory: () => void
+
+  publish: () => void
 }
 
-// ---------------------------------------------------------------------------
-// Yardımcı — aktif floor
-// ---------------------------------------------------------------------------
+type EditorStore = EditorState & EditorActions
 
-function getActiveFloor(state: EditorState): Floor | undefined {
-  return state.chart?.floors.find((f) => f.id === state.activeFloorId) ?? state.chart?.floors[0]
-}
+// --- Yardımcı Fonksiyonlar ---
 
-// ---------------------------------------------------------------------------
-// Varsayılan kategori paleti (tasarım sisteminden)
-// ---------------------------------------------------------------------------
+const defaultViewport: Viewport = { x: 0, y: 0, scale: 1 }
 
-const DEFAULT_CATEGORIES: Category[] = [
-  { id: nanoid(), label: 'Balcony',      color: '#457B9D', isWheelchair: false, order: 0 },
-  { id: nanoid(), label: 'Ground Floor', color: '#E63946', isWheelchair: false, order: 1 },
-]
+const createDefaultFloor = (order: number): Floor => ({
+  id: nanoid(),
+  label: order === 0 ? 'Ground Floor' : `Floor ${order + 1}`,
+  order,
+  sections: [],
+  objects: [],
+  lastViewport: { ...defaultViewport },
+})
 
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
+const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
-export const useEditorStore = create<EditorState & EditorActions>()(
-  immer((set, get) => ({
-    // ---- State ----
-    chart: null,
-    activeTool: 'select',
-    activeFloorId: null,
-    selectedObjectIds: [],
-    selectedSeatIds: [],
-    viewport: { x: 0, y: 0, scale: 1 },
+// --- Store ---
 
-    // ---- Temel ----
+export const useEditorStore = create<EditorStore>()(
+  subscribeWithSelector(
+    immer((set, get) => ({
 
-    initChart: (venueType) => {
-      const floorId = nanoid()
-      set((s) => {
-        s.chart = {
-          id: nanoid(),
-          name: 'Untitled Venue',
-          venueType,
-          floors: [{ id: floorId, label: 'Floor 1', order: 0, sections: [], objects: [] }],
-          categories: DEFAULT_CATEGORIES,
-          origin: { x: 0, y: 0 },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        }
-        s.activeFloorId = floorId
-      })
-    },
+      // --- Initial State ---
 
-    setActiveTool: (tool) => set((s) => { s.activeTool = tool }),
+      chart: null,
+      activeFloorId: null,
+      activeTool: 'select',
+      previousTool: null,
+      selectedObjectIds: [],
+      selectedSeatIds: [],
+      viewport: { ...defaultViewport },
+      isGridVisible: true,
+      isSnapEnabled: true,
+      editingContext: null,
+      history: [],
+      historyIndex: -1,
+      isPanning: false,
+      rowToolSettings: {
+        seatSpacing: DEFAULT_SEAT_SPACING,
+        rowSpacing:  DEFAULT_ROW_SPACING,
+      },
 
-    // ---- Seçim ----
+      // --- Venue ---
 
-    selectObjects: (ids) => set((s) => { s.selectedObjectIds = ids }),
-    clearSelection: () => set((s) => { s.selectedObjectIds = []; s.selectedSeatIds = [] }),
+      initChart: (venueType) => {
+        const firstFloor = createDefaultFloor(0)
+        const now = new Date()
 
-    // ---- Row CRUD ----
-
-    addRow: (row) =>
-      set((s) => {
-        const floor = getActiveFloor(s)
-        floor?.objects.push(row)
-      }),
-
-    updateRow: (rowId, patch) =>
-      set((s) => {
-        const floor = getActiveFloor(s)
-        if (!floor) return
-        const row = floor.objects.find((o) => o.id === rowId) as Row | undefined
-        if (!row) return
-        Object.assign(row, patch)
-      }),
-
-    removeRows: (rowIds) =>
-      set((s) => {
-        const floor = getActiveFloor(s)
-        if (!floor) return
-        floor.objects = floor.objects.filter((o) => !rowIds.includes(o.id))
-        s.selectedObjectIds = s.selectedObjectIds.filter((id) => !rowIds.includes(id))
-      }),
-
-    // ---- Koltuk güncelleme ----
-
-    updateSeats: (seatIds, patch) =>
-      set((s) => {
-        const floor = getActiveFloor(s)
-        if (!floor) return
-        for (const obj of floor.objects) {
-          if (obj.type !== 'row') continue
-          for (const seat of (obj as Row).seats) {
-            if (seatIds.includes(seat.id)) Object.assign(seat, patch)
+        set((state) => {
+          state.chart = {
+            id: nanoid(),
+            name: 'Untitled Plan',
+            venueType,
+            floors: [firstFloor],
+            categories: [],
+            origin: { x: 0, y: 0 },
+            createdAt: now,
+            updatedAt: now,
           }
-        }
-      }),
-
-    // ---- Kategori ataması (row bazlı) ----
-
-    assignCategoryToSelectedRows: (categoryId) =>
-      set((s) => {
-        const floor = getActiveFloor(s)
-        if (!floor) return
-        for (const obj of floor.objects) {
-          if (obj.type !== 'row') continue
-          if (!s.selectedObjectIds.includes(obj.id)) continue
-          for (const seat of (obj as Row).seats) {
-            if (!seat.categoryIds.includes(categoryId)) {
-              seat.categoryIds.push(categoryId)
-            }
-          }
-        }
-      }),
-
-    removeCategoryFromSelectedRows: (categoryId) =>
-      set((s) => {
-        const floor = getActiveFloor(s)
-        if (!floor) return
-        for (const obj of floor.objects) {
-          if (obj.type !== 'row') continue
-          if (!s.selectedObjectIds.includes(obj.id)) continue
-          for (const seat of (obj as Row).seats) {
-            seat.categoryIds = seat.categoryIds.filter((id) => id !== categoryId)
-          }
-        }
-      }),
-
-    // ---- Category CRUD ----
-
-    addCategory: (label) => {
-      const category: Category = {
-        id: nanoid(),
-        label,
-        color: '#2A9D8F',   // varsayılan renk
-        isWheelchair: false,
-        order: get().chart?.categories.length ?? 0,
-      }
-      set((s) => { s.chart?.categories.push(category) })
-      return category
-    },
-
-    updateCategory: (categoryId, patch) =>
-      set((s) => {
-        const cat = s.chart?.categories.find((c) => c.id === categoryId)
-        if (cat) Object.assign(cat, patch)
-      }),
-
-    removeCategory: (categoryId) =>
-      set((s) => {
-        if (!s.chart) return
-
-        // Kategoriye bağlı koltukların referansını temizle
-        for (const floor of s.chart.floors) {
-          for (const obj of floor.objects) {
-            if (obj.type !== 'row') continue
-            for (const seat of (obj as Row).seats) {
-              seat.categoryIds = seat.categoryIds.filter((id) => id !== categoryId)
-            }
-          }
-        }
-
-        s.chart.categories = s.chart.categories.filter((c) => c.id !== categoryId)
-      }),
-
-    reorderCategories: (orderedIds) =>
-      set((s) => {
-        if (!s.chart) return
-        // Verilen sıraya göre order alanını güncelle
-        orderedIds.forEach((id, idx) => {
-          const cat = s.chart!.categories.find((c) => c.id === id)
-          if (cat) cat.order = idx
+          state.activeFloorId = firstFloor.id
+          state.history = []
+          state.historyIndex = -1
         })
-        s.chart.categories.sort((a, b) => a.order - b.order)
-      }),
-  })),
+      },
+
+      setChartName: (name) => {
+        set((state) => {
+          if (!state.chart) return
+          state.chart.name = name
+          state.chart.updatedAt = new Date()
+        })
+      },
+
+      // --- Floor ---
+
+      addFloor: () => {
+        set((state) => {
+          if (!state.chart) return
+          const order = state.chart.floors.length
+          const newFloor = createDefaultFloor(order)
+          state.chart.floors.push(newFloor)
+          state.activeFloorId = newFloor.id
+        })
+      },
+
+      setActiveFloor: (floorId) => {
+        const { chart, viewport, activeFloorId } = get()
+        if (!chart) return
+
+        // Mevcut floor viewport'unu kaydet, sonra geç
+        set((state) => {
+          if (!state.chart) return
+
+          const current = state.chart.floors.find((f) => f.id === activeFloorId)
+          if (current) {
+            current.lastViewport = { ...viewport }
+          }
+
+          state.activeFloorId = floorId
+
+          const target = state.chart.floors.find((f) => f.id === floorId)
+          if (target?.lastViewport) {
+            state.viewport = { ...target.lastViewport }
+          }
+        })
+      },
+
+      removeFloor: (floorId) => {
+        set((state) => {
+          if (!state.chart) return
+          if (state.chart.floors.length <= 1) return
+
+          state.chart.floors = state.chart.floors.filter((f) => f.id !== floorId)
+
+          if (state.activeFloorId === floorId) {
+            state.activeFloorId = state.chart.floors[0]?.id ?? null
+          }
+        })
+      },
+
+      renameFloor: (floorId, label) => {
+        set((state) => {
+          if (!state.chart) return
+          const floor = state.chart.floors.find((f) => f.id === floorId)
+          if (floor) floor.label = label
+        })
+      },
+
+      // --- Nesneler ---
+
+      addObject: (object) => {
+        get().pushHistory()
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (floor) {
+            floor.objects.push(object as Floor['objects'][number])
+            state.chart.updatedAt = new Date()
+          }
+        })
+      },
+
+      updateObject: (id, updates) => {
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (!floor) return
+          const index = floor.objects.findIndex((o) => o.id === id)
+          if (index !== -1) {
+            // Immer draft üzerinde güvenli merge
+            floor.objects[index] = {
+              ...floor.objects[index],
+              ...updates,
+            } as Floor['objects'][number]
+            state.chart.updatedAt = new Date()
+          }
+        })
+      },
+
+      removeObject: (id) => {
+        get().pushHistory()
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (floor) {
+            floor.objects = floor.objects.filter((o) => o.id !== id)
+            state.chart.updatedAt = new Date()
+          }
+        })
+      },
+
+      removeSelectedObjects: () => {
+        const { selectedObjectIds } = get()
+        if (selectedObjectIds.length === 0) return
+        get().pushHistory()
+
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (floor) {
+            floor.objects = floor.objects.filter(
+              (o) => !selectedObjectIds.includes(o.id)
+            )
+          }
+          state.selectedObjectIds = []
+          state.selectedSeatIds = []
+        })
+      },
+
+      // --- Seçim ---
+
+      selectObjects: (ids) => {
+        set((state) => {
+          state.selectedObjectIds = ids
+          state.selectedSeatIds = []
+        })
+      },
+
+      selectSeats: (ids) => {
+        set((state) => {
+          state.selectedSeatIds = ids
+        })
+      },
+
+      clearSelection: () => {
+        set((state) => {
+          state.selectedObjectIds = []
+          state.selectedSeatIds = []
+        })
+      },
+
+      // --- Tool ---
+
+      setActiveTool: (tool) => {
+        set((state) => {
+          state.activeTool = tool
+          state.previousTool = null
+        })
+      },
+
+      setTemporaryTool: (tool) => {
+        set((state) => {
+          state.previousTool = state.activeTool
+          state.activeTool = tool
+        })
+      },
+
+      restorePreviousTool: () => {
+        set((state) => {
+          if (state.previousTool) {
+            state.activeTool = state.previousTool
+            state.previousTool = null
+          }
+        })
+      },
+
+      // --- Canvas ---
+
+      setViewport: (viewport) => {
+        set((state) => {
+          state.viewport = viewport
+        })
+      },
+
+      toggleGrid: () => {
+        set((state) => {
+          state.isGridVisible = !state.isGridVisible
+        })
+      },
+
+      toggleSnap: () => {
+        set((state) => {
+          state.isSnapEnabled = !state.isSnapEnabled
+        })
+      },
+
+      setIsPanning: (value) => {
+        set((state) => {
+          state.isPanning = value
+        })
+      },
+
+      setRowToolSettings: (patch) => {
+        set((state) => {
+          state.rowToolSettings = { ...state.rowToolSettings, ...patch }
+        })
+      },
+
+      // --- Section Context ---
+
+      enterSectionContext: (sectionId, floorId) => {
+        const { viewport } = get()
+        set((state) => {
+          state.editingContext = {
+            type: 'section',
+            sectionId,
+            floorId,
+            previousViewport: { ...viewport },
+          }
+        })
+      },
+
+      exitSectionContext: () => {
+        const { editingContext } = get()
+        set((state) => {
+          if (editingContext) {
+            state.viewport = { ...editingContext.previousViewport }
+          }
+          state.editingContext = null
+        })
+      },
+
+      // --- Kategoriler ---
+
+      addCategory: (label, color) => {
+        set((state) => {
+          if (!state.chart) return
+          state.chart.categories.push({
+            id: nanoid(),
+            label,
+            color,
+            accessible: false,
+          })
+        })
+      },
+
+      updateCategory: (id, updates) => {
+        set((state) => {
+          if (!state.chart) return
+          const index = state.chart.categories.findIndex((c) => c.id === id)
+          if (index !== -1) {
+            state.chart.categories[index] = {
+              ...state.chart.categories[index],
+              ...updates,
+            }
+          }
+        })
+      },
+
+      removeCategory: (id) => {
+        set((state) => {
+          if (!state.chart) return
+          state.chart.categories = state.chart.categories.filter((c) => c.id !== id)
+        })
+      },
+
+      // --- Undo/Redo ---
+
+      pushHistory: () => {
+        const { chart, history, historyIndex } = get()
+        if (!chart) return
+
+        const snapshot = deepClone(chart)
+        const newHistory = history.slice(0, historyIndex + 1)
+        newHistory.push(snapshot)
+
+        if (newHistory.length > MAX_HISTORY_SIZE) {
+          newHistory.shift()
+        }
+
+        set((state) => {
+          state.history = newHistory
+          state.historyIndex = newHistory.length - 1
+        })
+      },
+
+      undo: () => {
+        const { historyIndex, history } = get()
+        if (historyIndex <= 0) return
+
+        const target = history[historyIndex - 1]
+        set((state) => {
+          state.chart = deepClone(target)
+          state.historyIndex = historyIndex - 1
+          state.selectedObjectIds = []
+          state.selectedSeatIds = []
+        })
+      },
+
+      redo: () => {
+        const { historyIndex, history } = get()
+        if (historyIndex >= history.length - 1) return
+
+        const target = history[historyIndex + 1]
+        set((state) => {
+          state.chart = deepClone(target)
+          state.historyIndex = historyIndex + 1
+        })
+      },
+
+      // --- Publish ---
+
+      publish: () => {
+        const { chart } = get()
+        if (!chart) return
+        // TODO: Gerçek publish endpoint'i eklenecek
+        console.log('[Venue Plan Creator] Published Chart:', JSON.stringify(chart, null, 2))
+      },
+    }))
+  )
 )
 
-// ---------------------------------------------------------------------------
-// Selector — seçili row'ların category durumu
-// Tüm seçili row'ların koltuklarındaki categoryIds birleşimi
-// ---------------------------------------------------------------------------
+// --- Selector Hook'ları ---
+// Bileşenler bu hook'ları kullanır — gereksiz re-render önlenir
 
-export function useSelectedRowCategories() {
-  return useEditorStore((s) => {
-    const floor = s.chart?.floors.find((f) => f.id === s.activeFloorId) ?? s.chart?.floors[0]
-    if (!floor) return { assignedIds: [] as string[], categories: s.chart?.categories ?? [] }
+export const useActiveFloor = () =>
+  useEditorStore((s) =>
+    s.chart?.floors.find((f) => f.id === s.activeFloorId) ?? null
+  )
 
-    const assignedIds = new Set<string>()
-    for (const obj of floor.objects) {
-      if (obj.type !== 'row') continue
-      if (!s.selectedObjectIds.includes(obj.id)) continue
-      for (const seat of (obj as Row).seats) {
-        for (const cid of seat.categoryIds) assignedIds.add(cid)
-      }
-    }
+export const useActiveTool = () =>
+  useEditorStore((s) => s.activeTool)
 
-    return {
-      assignedIds: [...assignedIds],
-      categories: s.chart?.categories ?? [],
-    }
-  })
-}
+export const useSelectedObjectIds = () =>
+  useEditorStore((s) => s.selectedObjectIds)
+
+export const useIsGridVisible = () =>
+  useEditorStore((s) => s.isGridVisible)
+
+export const useIsSnapEnabled = () =>
+  useEditorStore((s) => s.isSnapEnabled)
+
+export const useEditingContext = () =>
+  useEditorStore((s) => s.editingContext)
+
+export const useCategories = () =>
+  useEditorStore((s) => s.chart?.categories ?? [])
+
+export const useCanUndo = () =>
+  useEditorStore((s) => s.historyIndex > 0)
+
+export const useCanRedo = () =>
+  useEditorStore((s) => s.historyIndex < s.history.length - 1)
+
+export const useVenueType = () =>
+  useEditorStore((s) => s.chart?.venueType ?? null) 
