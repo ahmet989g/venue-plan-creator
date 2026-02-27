@@ -34,14 +34,15 @@ export function useRowTool(stageRef: React.RefObject<Konva.Stage | null>): RowTo
 
   const shiftRef = useRef(false)
 
-  const { activeTool, activeFloorId, editingContext, addObject, seatSpacing } =
+  const { activeTool, activeFloorId, editingContext, addObject, seatSpacing, rowSpacing } =
     useEditorStore(
       useShallow((s) => ({
-        activeTool:      s.activeTool,
-        activeFloorId:   s.activeFloorId,
-        editingContext:  s.editingContext,
-        addObject:       s.addObject,
-        seatSpacing:     s.rowToolSettings.seatSpacing,
+        activeTool:     s.activeTool,
+        activeFloorId:  s.activeFloorId,
+        editingContext: s.editingContext,
+        addObject:      s.addObject,
+        seatSpacing:    s.rowToolSettings.seatSpacing,
+        rowSpacing:     s.rowToolSettings.rowSpacing,   // Yeni row'un rowSpacing değeri
       })),
     )
 
@@ -94,6 +95,7 @@ export function useRowTool(stageRef: React.RefObject<Konva.Stage | null>): RowTo
         activeFloorId,
         sectionId,
         seatSpacing,
+        rowSpacing,     // ← buildRow'a aktarılır
       )
 
       setToolState(nextState)
@@ -104,7 +106,7 @@ export function useRowTool(stageRef: React.RefObject<Konva.Stage | null>): RowTo
         useEditorStore.getState().pushHistory()
       }
     },
-    [isActive, activeFloorId, toolState, editingContext, getSnappedPoint, addObject, stageRef, seatSpacing],
+    [isActive, activeFloorId, toolState, editingContext, getSnappedPoint, addObject, stageRef, seatSpacing, rowSpacing],
   )
 
   const handleMouseMove = useCallback(

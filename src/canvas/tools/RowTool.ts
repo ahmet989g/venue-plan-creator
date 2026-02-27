@@ -5,18 +5,18 @@
 import { nanoid } from 'nanoid'
 import { angle, calcSeatCount, calcSeatPositions } from '@/lib/geometry'
 import type { Point, Row, Seat } from '@/store/types'
-import { DEFAULT_SEAT_SPACING } from '@/lib/constants'
+import { DEFAULT_ROW_SPACING, DEFAULT_SEAT_SPACING } from '@/lib/constants'
 
 export type RowToolStep = 'idle' | 'drawing'
 
 export interface RowToolState {
-  step:          RowToolStep
-  startPoint:    Point | null
-  cursorPoint:   Point | null   // Ham cursor — snap uygulanmamış
-  snappedEnd:    Point | null   // Açı snap uygulanmış bitiş noktası
-  seatCount:     number
-  angleDeg:      number         // Anlık açı — preview göstergesi için
-  isAngleSnapped: boolean       // Shift basılıyken true
+  step:           RowToolStep
+  startPoint:     Point | null
+  cursorPoint:    Point | null   // Ham cursor — snap uygulanmamış
+  snappedEnd:     Point | null   // Açı snap uygulanmış bitiş noktası
+  seatCount:      number
+  angleDeg:       number         // Anlık açı — preview göstergesi için
+  isAngleSnapped: boolean        // Shift basılıyken true
 }
 
 export const initialRowToolState: RowToolState = {
@@ -51,6 +51,7 @@ export function handleRowToolClick(
   floorId:     string,
   sectionId:   string | null,
   seatSpacing: number = DEFAULT_SEAT_SPACING,
+  rowSpacing:  number = DEFAULT_ROW_SPACING,
 ): { nextState: RowToolState; newRow: Row | null } {
   if (state.step === 'idle') {
     return {
@@ -72,7 +73,7 @@ export function handleRowToolClick(
     }
     return {
       nextState: initialRowToolState,
-      newRow:    buildRow(state.startPoint, end, floorId, sectionId, seatSpacing),
+      newRow:    buildRow(state.startPoint, end, floorId, sectionId, seatSpacing, rowSpacing),
     }
   }
 
@@ -113,6 +114,7 @@ function buildRow(
   floorId:     string,
   sectionId:   string | null,
   seatSpacing: number = DEFAULT_SEAT_SPACING,
+  rowSpacing:  number = DEFAULT_ROW_SPACING,
 ): Row {
   const rowId       = nanoid()
   const rotationDeg = angle(start, end) * (180 / Math.PI)
@@ -123,25 +125,34 @@ function buildRow(
     rowId,
     index:          i,
     label:          String(i + 1),
-    categoryId:     null,
+    categoryIds:    [],     // Yeni tip: array (önceki: categoryId: null)
     accessible:     false,
     restrictedView: false,
     isAvailable:    true,
   }))
 
   return {
-    id:          rowId,
-    type:        'row',
+    id:                 rowId,
+    type:               'row',
     floorId,
     sectionId,
-    label:       '',
+    label:              '',
     seats,
-    x:           start.x,
-    y:           start.y,
-    rotation:    rotationDeg,
-    curve:       0,
+    x:                  start.x,
+    y:                  start.y,
+    rotation:           rotationDeg,
+    curve:              0,
+    rowSpacing,
     seatSpacing,
-    isVisible:   true,
-    isLocked:    false,
+    isVisible:          true,
+    isLocked:           false,
+    // Labeling varsayılanları
+    sectionLabel:       '',
+    rowLabel:           '',
+    rowLabelPosition:   [],          // Hiçbir tarafta gösterilmez
+    rowLabelDirection:  'ltr',
+    seatLabelingMode:   '1,2,3',     // Soldan sağa ardışık
+    seatLabelStartAt:   1,
+    seatLabelDirection: 'ltr',
   }
 }

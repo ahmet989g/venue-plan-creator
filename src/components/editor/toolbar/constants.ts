@@ -65,6 +65,7 @@ export const TOOLBAR_TOOLS: ToolDefinition[] = [
     hiddenFor: ['large-theatre'],
     dropdown: [
       { id: 'row',           icon: 'icon-row-single',    label: 'Row Tool'           },
+      { id: 'row-segmented',           icon: 'icon-row-segmented',    label: 'Segmented Row Tool'},
       { id: 'multiple-row',  icon: 'icon-row-multiple',  label: 'Multiple Rows Tool' },
     ],
   },

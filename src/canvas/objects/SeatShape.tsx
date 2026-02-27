@@ -2,6 +2,8 @@
 
 // Tekil koltuk — dünya koordinatında sabit boyut
 // Konva stage scale'i her şeyi orantılı büyütür/küçültür — ayrıca scale hesabı gerekmez
+// Label: seat.label string dairenin ortasında gösterilir
+// Accessible: ♿ ikonu label'ın üstüne bindirilir
 
 import { memo } from 'react'
 import { Circle, Group, Text } from 'react-konva'
@@ -12,7 +14,14 @@ const COLORS = {
   free: (color: string) => color,
   selected: '#ffffff',
   unavailable: '#3a3a3a',
-  default: '#4a90d9',
+}
+
+// Label font boyutu — karakter sayısına göre küçültülür
+function labelFontSize(label: string): number {
+  if (label.length <= 1) return SEAT_RADIUS * 0.90
+  if (label.length <= 2) return SEAT_RADIUS * 0.75
+  if (label.length <= 3) return SEAT_RADIUS * 0.60
+  return SEAT_RADIUS * 0.50
 }
 
 interface SeatShapeProps {
@@ -31,6 +40,10 @@ function SeatShape({ seat, x, y, categoryColor, isSelected, onSelect }: SeatShap
       ? COLORS.free(categoryColor)
       : COLORS.unavailable
 
+  // Seçiliyken label koyu, aksi halde beyaz
+  const labelColor = isSelected ? '#1f2328' : 'rgba(255,255,255,0.90)'
+  const fs = labelFontSize(seat.label)
+
   return (
     <Group
       x={x}
@@ -38,6 +51,7 @@ function SeatShape({ seat, x, y, categoryColor, isSelected, onSelect }: SeatShap
       onClick={(e) => onSelect(seat.id, e.evt.shiftKey)}
       onTap={(e) => onSelect(seat.id, e.evt.shiftKey)}
     >
+      {/* Koltuk dairesi */}
       <Circle
         radius={SEAT_RADIUS}
         fill={fill}
@@ -46,15 +60,36 @@ function SeatShape({ seat, x, y, categoryColor, isSelected, onSelect }: SeatShap
         perfectDrawEnabled={false}
       />
 
+      {/* Koltuk label — dairenin tam ortasında */}
+      {seat.label && !seat.accessible && (
+        <Text
+          text={seat.label}
+          fontSize={fs}
+          fontStyle="bold"
+          fill={labelColor}
+          align="center"
+          verticalAlign="middle"
+          width={SEAT_RADIUS * 2}
+          height={SEAT_RADIUS * 2}
+          offsetX={SEAT_RADIUS}
+          offsetY={SEAT_RADIUS}
+          listening={false}
+          perfectDrawEnabled={false}
+        />
+      )}
+
+      {/* Erişilebilirlik ikonu — label yerine gösterilir */}
       {seat.accessible && (
         <Text
           text="♿"
           fontSize={SEAT_RADIUS * 0.9}
-          fill="#ffffff"
+          fill={labelColor}
           align="center"
           verticalAlign="middle"
-          offsetX={SEAT_RADIUS * 0.45}
-          offsetY={SEAT_RADIUS * 0.45}
+          width={SEAT_RADIUS * 2}
+          height={SEAT_RADIUS * 2}
+          offsetX={SEAT_RADIUS}
+          offsetY={SEAT_RADIUS}
           listening={false}
           perfectDrawEnabled={false}
         />

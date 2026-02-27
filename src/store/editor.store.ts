@@ -12,28 +12,32 @@ import type {
   Floor,
   ChartObject,
   Category,
+  Row,
+  Seat,
   Viewport,
   EditingContext,
 } from './types'
 import { DEFAULT_ROW_SPACING, DEFAULT_SEAT_SPACING, MAX_HISTORY_SIZE } from '@/lib/constants'
+import { computeSeatLabels } from '@/lib/seat-labeling'
 
 // --- State Tipi ---
 
 interface EditorState {
-  chart: VenueChart | null
-  activeFloorId: string | null
-  activeTool: ToolType
-  previousTool: ToolType | null
+  chart:             VenueChart | null
+  activeFloorId:     string | null
+  activeTool:        ToolType
+  previousTool:      ToolType | null
   selectedObjectIds: string[]
-  selectedSeatIds: string[]
-  viewport: Viewport
-  isGridVisible: boolean
-  isSnapEnabled: boolean
-  editingContext: EditingContext
-  history: VenueChart[]
-  historyIndex: number
-  isPanning: boolean
-  rowToolSettings: RowToolSettings
+  selectedSeatIds:   string[]
+  viewport:          Viewport
+  isGridVisible:     boolean
+  isSnapEnabled:     boolean
+  editingContext:    EditingContext
+  history:           VenueChart[]
+  historyIndex:      number
+  isPanning:         boolean
+  rowToolSettings:   RowToolSettings
+  isInteracting:     boolean  // drag veya rotate süresince true
 }
 
 export interface RowToolSettings {
@@ -44,42 +48,55 @@ export interface RowToolSettings {
 // --- Action Tipi ---
 
 interface EditorActions {
-  initChart: (venueType: VenueType) => void
+  initChart:    (venueType: VenueType) => void
   setChartName: (name: string) => void
 
-  addFloor: () => void
+  addFloor:    () => void
   setActiveFloor: (floorId: string) => void
   removeFloor: (floorId: string) => void
   renameFloor: (floorId: string, label: string) => void
 
-  addObject: (object: ChartObject) => void
-  updateObject: (id: string, updates: Partial<ChartObject>) => void
-  removeObject: (id: string) => void
+  addObject:             (object: ChartObject) => void
+  updateObject:          (id: string, updates: Partial<ChartObject>) => void
+  removeObject:          (id: string) => void
   removeSelectedObjects: () => void
 
   selectObjects: (ids: string[]) => void
-  selectSeats: (ids: string[]) => void
+  selectSeats:   (ids: string[]) => void
   clearSelection: () => void
 
-  setActiveTool: (tool: ToolType) => void
-  setTemporaryTool: (tool: ToolType) => void
+  setActiveTool:       (tool: ToolType) => void
+  setTemporaryTool:    (tool: ToolType) => void
   restorePreviousTool: () => void
 
-  setViewport: (viewport: Viewport) => void
-  toggleGrid: () => void
-  toggleSnap: () => void
-  setIsPanning: (value: boolean) => void
-  setRowToolSettings: (patch: Partial<RowToolSettings>) => void
+  setViewport:         (viewport: Viewport) => void
+  toggleGrid:          () => void
+  toggleSnap:          () => void
+  setIsPanning:        (value: boolean) => void
+  setRowToolSettings:  (patch: Partial<RowToolSettings>) => void
+  setInteracting:      (value: boolean) => void
 
   enterSectionContext: (sectionId: string, floorId: string) => void
-  exitSectionContext: () => void
+  exitSectionContext:  () => void
 
-  addCategory: (label: string, color: string) => void
-  updateCategory: (id: string, updates: Partial<Category>) => void
-  removeCategory: (id: string) => void
+  addCategory:          (label: string, color: string) => void
+  updateCategory:       (id: string, updates: Partial<Category>) => void
+  removeCategory:       (id: string) => void
+  reorderCategories:    (orderedIds: string[]) => void
+  // Seçili koltuklar (veya tüm row) için kategori ataması
+  assignCategoryToSeats: (seatIds: string[], categoryId: string, remove?: boolean) => void
 
-  undo: () => void
-  redo: () => void
+  // Labeling alanlarını güncelle ve seat label'larını yeniden hesapla
+  updateRowLabeling: (rowId: string, patch: Partial<Pick<Row,
+    'seatLabelingMode' | 'seatLabelStartAt' | 'seatLabelDirection' |
+    'sectionLabel' | 'rowLabel' | 'rowLabelPosition'
+  >>) => void
+
+  // Çoklu row güncelleme — aynı patch'i birden fazla row'a uygular
+  updateRows: (rowIds: string[], patch: Partial<Row>) => void
+
+  undo:        () => void
+  redo:        () => void
   pushHistory: () => void
 
   publish: () => void
@@ -92,11 +109,11 @@ type EditorStore = EditorState & EditorActions
 const defaultViewport: Viewport = { x: 0, y: 0, scale: 1 }
 
 const createDefaultFloor = (order: number): Floor => ({
-  id: nanoid(),
-  label: order === 0 ? 'Ground Floor' : `Floor ${order + 1}`,
+  id:           nanoid(),
+  label:        order === 0 ? 'Ground Floor' : `Floor ${order + 1}`,
   order,
-  sections: [],
-  objects: [],
+  sections:     [],
+  objects:      [],
   lastViewport: { ...defaultViewport },
 })
 
@@ -110,19 +127,20 @@ export const useEditorStore = create<EditorStore>()(
 
       // --- Initial State ---
 
-      chart: null,
-      activeFloorId: null,
-      activeTool: 'select',
-      previousTool: null,
+      chart:             null,
+      activeFloorId:     null,
+      activeTool:        'select',
+      previousTool:      null,
       selectedObjectIds: [],
-      selectedSeatIds: [],
-      viewport: { ...defaultViewport },
-      isGridVisible: true,
-      isSnapEnabled: true,
-      editingContext: null,
-      history: [],
-      historyIndex: -1,
-      isPanning: false,
+      selectedSeatIds:   [],
+      viewport:          { ...defaultViewport },
+      isGridVisible:     true,
+      isSnapEnabled:     true,
+      editingContext:    null,
+      history:           [],
+      historyIndex:      -1,
+      isPanning:         false,
+      isInteracting:  false,
       rowToolSettings: {
         seatSpacing: DEFAULT_SEAT_SPACING,
         rowSpacing:  DEFAULT_ROW_SPACING,
@@ -136,25 +154,25 @@ export const useEditorStore = create<EditorStore>()(
 
         set((state) => {
           state.chart = {
-            id: nanoid(),
-            name: 'Untitled Plan',
+            id:         nanoid(),
+            name:       'Untitled Plan',
             venueType,
-            floors: [firstFloor],
+            floors:     [firstFloor],
             categories: [],
-            origin: { x: 0, y: 0 },
-            createdAt: now,
-            updatedAt: now,
+            origin:     { x: 0, y: 0 },
+            createdAt:  now,
+            updatedAt:  now,
           }
-          state.activeFloorId = firstFloor.id
-          state.history = []
-          state.historyIndex = -1
+          state.activeFloorId  = firstFloor.id
+          state.history        = []
+          state.historyIndex   = -1
         })
       },
 
       setChartName: (name) => {
         set((state) => {
           if (!state.chart) return
-          state.chart.name = name
+          state.chart.name      = name
           state.chart.updatedAt = new Date()
         })
       },
@@ -164,7 +182,7 @@ export const useEditorStore = create<EditorStore>()(
       addFloor: () => {
         set((state) => {
           if (!state.chart) return
-          const order = state.chart.floors.length
+          const order    = state.chart.floors.length
           const newFloor = createDefaultFloor(order)
           state.chart.floors.push(newFloor)
           state.activeFloorId = newFloor.id
@@ -175,31 +193,24 @@ export const useEditorStore = create<EditorStore>()(
         const { chart, viewport, activeFloorId } = get()
         if (!chart) return
 
-        // Mevcut floor viewport'unu kaydet, sonra geç
         set((state) => {
           if (!state.chart) return
 
+          // Mevcut floor viewport'unu kaydet
           const current = state.chart.floors.find((f) => f.id === activeFloorId)
-          if (current) {
-            current.lastViewport = { ...viewport }
-          }
+          if (current) current.lastViewport = { ...viewport }
 
           state.activeFloorId = floorId
 
           const target = state.chart.floors.find((f) => f.id === floorId)
-          if (target?.lastViewport) {
-            state.viewport = { ...target.lastViewport }
-          }
+          if (target?.lastViewport) state.viewport = { ...target.lastViewport }
         })
       },
 
       removeFloor: (floorId) => {
         set((state) => {
-          if (!state.chart) return
-          if (state.chart.floors.length <= 1) return
-
+          if (!state.chart || state.chart.floors.length <= 1) return
           state.chart.floors = state.chart.floors.filter((f) => f.id !== floorId)
-
           if (state.activeFloorId === floorId) {
             state.activeFloorId = state.chart.floors[0]?.id ?? null
           }
@@ -235,7 +246,6 @@ export const useEditorStore = create<EditorStore>()(
           if (!floor) return
           const index = floor.objects.findIndex((o) => o.id === id)
           if (index !== -1) {
-            // Immer draft üzerinde güvenli merge
             floor.objects[index] = {
               ...floor.objects[index],
               ...updates,
@@ -251,7 +261,7 @@ export const useEditorStore = create<EditorStore>()(
           if (!state.chart || !state.activeFloorId) return
           const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
           if (floor) {
-            floor.objects = floor.objects.filter((o) => o.id !== id)
+            floor.objects    = floor.objects.filter((o) => o.id !== id)
             state.chart.updatedAt = new Date()
           }
         })
@@ -267,11 +277,11 @@ export const useEditorStore = create<EditorStore>()(
           const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
           if (floor) {
             floor.objects = floor.objects.filter(
-              (o) => !selectedObjectIds.includes(o.id)
+              (o) => !selectedObjectIds.includes(o.id),
             )
           }
           state.selectedObjectIds = []
-          state.selectedSeatIds = []
+          state.selectedSeatIds   = []
         })
       },
 
@@ -280,7 +290,7 @@ export const useEditorStore = create<EditorStore>()(
       selectObjects: (ids) => {
         set((state) => {
           state.selectedObjectIds = ids
-          state.selectedSeatIds = []
+          state.selectedSeatIds   = []
         })
       },
 
@@ -293,7 +303,7 @@ export const useEditorStore = create<EditorStore>()(
       clearSelection: () => {
         set((state) => {
           state.selectedObjectIds = []
-          state.selectedSeatIds = []
+          state.selectedSeatIds   = []
         })
       },
 
@@ -301,7 +311,7 @@ export const useEditorStore = create<EditorStore>()(
 
       setActiveTool: (tool) => {
         set((state) => {
-          state.activeTool = tool
+          state.activeTool   = tool
           state.previousTool = null
         })
       },
@@ -309,14 +319,14 @@ export const useEditorStore = create<EditorStore>()(
       setTemporaryTool: (tool) => {
         set((state) => {
           state.previousTool = state.activeTool
-          state.activeTool = tool
+          state.activeTool   = tool
         })
       },
 
       restorePreviousTool: () => {
         set((state) => {
           if (state.previousTool) {
-            state.activeTool = state.previousTool
+            state.activeTool   = state.previousTool
             state.previousTool = null
           }
         })
@@ -325,27 +335,19 @@ export const useEditorStore = create<EditorStore>()(
       // --- Canvas ---
 
       setViewport: (viewport) => {
-        set((state) => {
-          state.viewport = viewport
-        })
+        set((state) => { state.viewport = viewport })
       },
 
       toggleGrid: () => {
-        set((state) => {
-          state.isGridVisible = !state.isGridVisible
-        })
+        set((state) => { state.isGridVisible = !state.isGridVisible })
       },
 
       toggleSnap: () => {
-        set((state) => {
-          state.isSnapEnabled = !state.isSnapEnabled
-        })
+        set((state) => { state.isSnapEnabled = !state.isSnapEnabled })
       },
 
       setIsPanning: (value) => {
-        set((state) => {
-          state.isPanning = value
-        })
+        set((state) => { state.isPanning = value })
       },
 
       setRowToolSettings: (patch) => {
@@ -354,13 +356,17 @@ export const useEditorStore = create<EditorStore>()(
         })
       },
 
+      setInteracting: (value) => {
+        set((state) => { state.isInteracting = value })
+      },
+
       // --- Section Context ---
 
       enterSectionContext: (sectionId, floorId) => {
         const { viewport } = get()
         set((state) => {
           state.editingContext = {
-            type: 'section',
+            type:             'section',
             sectionId,
             floorId,
             previousViewport: { ...viewport },
@@ -371,9 +377,7 @@ export const useEditorStore = create<EditorStore>()(
       exitSectionContext: () => {
         const { editingContext } = get()
         set((state) => {
-          if (editingContext) {
-            state.viewport = { ...editingContext.previousViewport }
-          }
+          if (editingContext) state.viewport = { ...editingContext.previousViewport }
           state.editingContext = null
         })
       },
@@ -383,11 +387,13 @@ export const useEditorStore = create<EditorStore>()(
       addCategory: (label, color) => {
         set((state) => {
           if (!state.chart) return
+          const order = state.chart.categories.length
           state.chart.categories.push({
-            id: nanoid(),
+            id:           nanoid(),
             label,
             color,
-            accessible: false,
+            isWheelchair: false,
+            order,
           })
         })
       },
@@ -408,7 +414,132 @@ export const useEditorStore = create<EditorStore>()(
       removeCategory: (id) => {
         set((state) => {
           if (!state.chart) return
+
+          // Kategoriye ait referansları tüm floor'lardaki seat'lerden temizle
+          for (const floor of state.chart.floors) {
+            for (const obj of floor.objects) {
+              if (obj.type === 'row') {
+                const row = obj as Row
+                for (const seat of row.seats) {
+                  seat.categoryIds = seat.categoryIds.filter((cId) => cId !== id)
+                }
+              }
+            }
+          }
+
           state.chart.categories = state.chart.categories.filter((c) => c.id !== id)
+        })
+      },
+
+      // dnd-kit sürükleme sonrası yeni sırayı uygula
+      reorderCategories: (orderedIds) => {
+        set((state) => {
+          if (!state.chart) return
+          const map = new Map(state.chart.categories.map((c) => [c.id, c]))
+          state.chart.categories = orderedIds
+            .map((id, index) => {
+              const cat = map.get(id)
+              if (!cat) return null
+              return { ...cat, order: index }
+            })
+            .filter(Boolean) as Category[]
+        })
+      },
+
+      // Seçili koltuk ID'lerine kategori ekle veya çıkar
+      assignCategoryToSeats: (seatIds, categoryId, remove = false) => {        if (seatIds.length === 0) return
+        get().pushHistory()
+
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (!floor) return
+
+          const seatSet = new Set(seatIds)
+
+          for (const obj of floor.objects) {
+            if (obj.type !== 'row') continue
+            const row = obj as Row
+            for (const seat of row.seats) {
+              if (!seatSet.has(seat.id)) continue
+              if (remove) {
+                seat.categoryIds = seat.categoryIds.filter((id) => id !== categoryId)
+              } else if (!seat.categoryIds.includes(categoryId)) {
+                seat.categoryIds.push(categoryId)
+              }
+            }
+          }
+
+          state.chart.updatedAt = new Date()
+        })
+      },
+
+      // Labeling alanlarını güncelle ve seat label'larını otomatik yeniden hesapla
+      updateRowLabeling: (rowId, patch) => {
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (!floor) return
+
+          const obj = floor.objects.find((o) => o.id === rowId)
+          if (!obj || obj.type !== 'row') return
+
+          const row = obj as Row
+
+          // Patch uygula
+          Object.assign(row, patch)
+
+          // Seat label'larını yeniden hesapla — labeling alanı değişti
+          const newLabels = computeSeatLabels(
+            row.seats.length,
+            row.seatLabelingMode,
+            row.seatLabelStartAt,
+            row.seatLabelDirection,
+          )
+          row.seats.forEach((seat, i) => {
+            seat.label = newLabels[i] ?? String(i + 1)
+          })
+
+          state.chart!.updatedAt = new Date()
+        })
+      },
+
+      // Aynı patch'i birden fazla row'a uygular — çoklu seçim için
+      updateRows: (rowIds, patch) => {
+        if (rowIds.length === 0) return
+        get().pushHistory()
+
+        set((state) => {
+          if (!state.chart || !state.activeFloorId) return
+          const floor = state.chart.floors.find((f) => f.id === state.activeFloorId)
+          if (!floor) return
+
+          const rowIdSet = new Set(rowIds)
+          for (const obj of floor.objects) {
+            if (obj.type !== 'row' || !rowIdSet.has(obj.id)) continue
+            const row = obj as Row
+            Object.assign(row, patch)
+
+            // Labeling alanı değiştiyse seat label'larını yeniden hesapla
+            const labelingChanged =
+              'seatLabelingMode'    in patch ||
+              'seatLabelStartAt'    in patch ||
+              'seatLabelDirection'  in patch
+
+            if (labelingChanged) {
+              const newLabels = computeSeatLabels(
+                row.seats.length,
+                row.seatLabelingMode,
+                row.seatLabelStartAt,
+                row.seatLabelDirection,
+              )
+              row.seats.forEach((seat, i) => {
+                seat.label = newLabels[i] ?? String(i + 1)
+              })
+            }
+          }
+
+          state.chart!.updatedAt = new Date()
         })
       },
 
@@ -418,16 +549,14 @@ export const useEditorStore = create<EditorStore>()(
         const { chart, history, historyIndex } = get()
         if (!chart) return
 
-        const snapshot = deepClone(chart)
+        const snapshot   = deepClone(chart)
         const newHistory = history.slice(0, historyIndex + 1)
         newHistory.push(snapshot)
 
-        if (newHistory.length > MAX_HISTORY_SIZE) {
-          newHistory.shift()
-        }
+        if (newHistory.length > MAX_HISTORY_SIZE) newHistory.shift()
 
         set((state) => {
-          state.history = newHistory
+          state.history      = newHistory
           state.historyIndex = newHistory.length - 1
         })
       },
@@ -438,10 +567,10 @@ export const useEditorStore = create<EditorStore>()(
 
         const target = history[historyIndex - 1]
         set((state) => {
-          state.chart = deepClone(target)
-          state.historyIndex = historyIndex - 1
+          state.chart            = deepClone(target)
+          state.historyIndex     = historyIndex - 1
           state.selectedObjectIds = []
-          state.selectedSeatIds = []
+          state.selectedSeatIds  = []
         })
       },
 
@@ -451,7 +580,7 @@ export const useEditorStore = create<EditorStore>()(
 
         const target = history[historyIndex + 1]
         set((state) => {
-          state.chart = deepClone(target)
+          state.chart        = deepClone(target)
           state.historyIndex = historyIndex + 1
         })
       },
@@ -464,41 +593,22 @@ export const useEditorStore = create<EditorStore>()(
         // TODO: Gerçek publish endpoint'i eklenecek
         console.log('[Venue Plan Creator] Published Chart:', JSON.stringify(chart, null, 2))
       },
-    }))
-  )
+    })),
+  ),
 )
 
 // --- Selector Hook'ları ---
-// Bileşenler bu hook'ları kullanır — gereksiz re-render önlenir
+// Bileşenler doğrudan bu hook'ları kullanır — gereksiz re-render önlenir
 
 export const useActiveFloor = () =>
-  useEditorStore((s) =>
-    s.chart?.floors.find((f) => f.id === s.activeFloorId) ?? null
-  )
+  useEditorStore((s) => s.chart?.floors.find((f) => f.id === s.activeFloorId) ?? null)
 
-export const useActiveTool = () =>
-  useEditorStore((s) => s.activeTool)
-
-export const useSelectedObjectIds = () =>
-  useEditorStore((s) => s.selectedObjectIds)
-
-export const useIsGridVisible = () =>
-  useEditorStore((s) => s.isGridVisible)
-
-export const useIsSnapEnabled = () =>
-  useEditorStore((s) => s.isSnapEnabled)
-
-export const useEditingContext = () =>
-  useEditorStore((s) => s.editingContext)
-
-export const useCategories = () =>
-  useEditorStore((s) => s.chart?.categories ?? [])
-
-export const useCanUndo = () =>
-  useEditorStore((s) => s.historyIndex > 0)
-
-export const useCanRedo = () =>
-  useEditorStore((s) => s.historyIndex < s.history.length - 1)
-
-export const useVenueType = () =>
-  useEditorStore((s) => s.chart?.venueType ?? null) 
+export const useActiveTool      = () => useEditorStore((s) => s.activeTool)
+export const useSelectedObjectIds = () => useEditorStore((s) => s.selectedObjectIds)
+export const useIsGridVisible   = () => useEditorStore((s) => s.isGridVisible)
+export const useIsSnapEnabled   = () => useEditorStore((s) => s.isSnapEnabled)
+export const useEditingContext  = () => useEditorStore((s) => s.editingContext)
+export const useCategories      = () => useEditorStore((s) => s.chart?.categories ?? [])
+export const useCanUndo         = () => useEditorStore((s) => s.historyIndex > 0)
+export const useCanRedo         = () => useEditorStore((s) => s.historyIndex < s.history.length - 1)
+export const useVenueType       = () => useEditorStore((s) => s.chart?.venueType ?? null)

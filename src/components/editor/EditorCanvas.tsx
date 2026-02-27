@@ -20,6 +20,7 @@ import SelectionLayer from '@/canvas/layers/SelectionLayer'
 import CenterMark from '@/canvas/CenterMark'
 import RowShape from '@/canvas/objects/RowShape'
 import RowPreview from '@/canvas/objects/RowPreview'
+import RowDragGuides from '@/canvas/objects/RowDragGuides'
 import CanvasControls from './CanvasControls'
 import type { Row } from '@/store/types'
 
@@ -36,18 +37,20 @@ export default function EditorCanvas() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
-  const { activeTool, activeFloor, categories, setViewport, setTemporaryTool, restorePreviousTool, seatSpacing } =
-    useEditorStore(
-      useShallow((s) => ({
-        activeTool: s.activeTool,
-        activeFloor: s.chart?.floors.find((f) => f.id === s.activeFloorId) ?? null,
-        categories: s.chart?.categories ?? [],
-        setViewport: s.setViewport,
-        setTemporaryTool: s.setTemporaryTool,
-        restorePreviousTool: s.restorePreviousTool,
-        seatSpacing: s.rowToolSettings.seatSpacing,
-      })),
-    )
+  const {
+    activeTool, activeFloor, categories,
+    setViewport, setTemporaryTool, restorePreviousTool, seatSpacing,
+  } = useEditorStore(
+    useShallow((s) => ({
+      activeTool: s.activeTool,
+      activeFloor: s.chart?.floors.find((f) => f.id === s.activeFloorId) ?? null,
+      categories: s.chart?.categories ?? [],
+      setViewport: s.setViewport,
+      setTemporaryTool: s.setTemporaryTool,
+      restorePreviousTool: s.restorePreviousTool,
+      seatSpacing: s.rowToolSettings.seatSpacing,
+    })),
+  )
 
   const { handleWheel, zoomIn, zoomOut } = useCanvasZoom()
 
@@ -64,7 +67,8 @@ export default function EditorCanvas() {
     handleObjectSelect,
   } = useSelectTool(stageRef)
 
-  const { startDrag, isDraggingRef } = useDragMove({ stageRef })
+  // draggingIdsRef — RowDragGuides'a aktarılır
+  const { startDrag, isDraggingRef, draggingIdsRef } = useDragMove({ stageRef })
 
   // Container boyutunu izle
   useEffect(() => {
@@ -88,7 +92,7 @@ export default function EditorCanvas() {
     setViewport({ x, y, scale: 1 })
   }, [size, setViewport])
 
-  // Scale değişimini dinle — CenterMark ve RowPreview için
+  // Scale değişimini dinle
   useEffect(() => {
     const stage = stageRef.current
     if (!stage) return
@@ -97,7 +101,7 @@ export default function EditorCanvas() {
     return () => { stage.off('scaleXChange', update) }
   }, [size.width])
 
-  // Keyboard — ref pattern, listener bir kez kurulur
+  // Keyboard — ref pattern
   const handleRowKeyDownRef = useRef(handleRowKeyDown)
   const setTemporaryToolRef = useRef(setTemporaryTool)
   const restorePreviousRef = useRef(restorePreviousTool)
@@ -130,8 +134,9 @@ export default function EditorCanvas() {
             e.shiftKey ? store.redo() : store.undo()
           }
           break
+        default:
+          handleRowKeyDownRef.current(e)
       }
-      handleRowKeyDownRef.current(e)
     }
 
     const onKeyUp = (e: KeyboardEvent) => {
@@ -146,39 +151,14 @@ export default function EditorCanvas() {
     }
   }, [])
 
-  // Stage click — tool'a göre yönlendir
-  const handleStageClick = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
-      if (activeTool === 'row') handleRowClick(e)
-      if (activeTool === 'select') handleSelectStageClick(e)
-    },
-    [activeTool, handleRowClick, handleSelectStageClick],
-  )
-
-  // Stage mouse move
-  const handleStageMouseMove = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
-      if (activeTool === 'row') handleRowMouseMove(e)
-
-      if (activeTool === 'hand' && isPanningRef.current) {
-        const stage = stageRef.current
-        if (!stage) return
-        stage.position({
-          x: stage.x() + e.evt.movementX,
-          y: stage.y() + e.evt.movementY,
-        })
-        stage.fire('xChange')
-      }
-    },
-    [activeTool, handleRowMouseMove],
-  )
-
   const handleMouseDown = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
       if (activeTool !== 'hand') return
-      e.evt.preventDefault()
+      const stage = stageRef.current
+      if (!stage || e.target !== stage) return
       isPanningRef.current = true
       setIsPanning(true)
+      stage.startDrag()
     },
     [activeTool],
   )
@@ -187,14 +167,26 @@ export default function EditorCanvas() {
     if (!isPanningRef.current) return
     isPanningRef.current = false
     setIsPanning(false)
-    const stage = stageRef.current
-    if (!stage) return
-    const pos = stage.position()
-    setViewport({ x: pos.x, y: pos.y, scale: stage.scaleX() })
-  }, [setViewport])
+    stageRef.current?.stopDrag()
+  }, [])
 
-  const handleZoomIn = useCallback(() => { if (stageRef.current) zoomIn(stageRef.current) }, [zoomIn])
-  const handleZoomOut = useCallback(() => { if (stageRef.current) zoomOut(stageRef.current) }, [zoomOut])
+  const handleStageMouseMove = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      if (activeTool === 'row') handleRowMouseMove(e)
+    },
+    [activeTool, handleRowMouseMove],
+  )
+
+  const handleStageClick = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      if (activeTool === 'row') handleRowClick(e)
+      if (activeTool === 'select') handleSelectStageClick(e)
+    },
+    [activeTool, handleRowClick, handleSelectStageClick],
+  )
+
+  const handleZoomIn = useCallback(() => zoomIn(stageRef), [zoomIn])
+  const handleZoomOut = useCallback(() => zoomOut(stageRef), [zoomOut])
 
   const cursor =
     activeTool === 'row' ? 'crosshair' :
@@ -209,7 +201,12 @@ export default function EditorCanvas() {
     >
       {size.width > 0 && (
         <>
-          <GridLayer stageRef={stageRef} width={size.width} height={size.height} isDark={isDark} />
+          <GridLayer
+            stageRef={stageRef}
+            width={size.width}
+            height={size.height}
+            isDark={isDark}
+          />
 
           <Stage
             ref={stageRef}
@@ -239,18 +236,38 @@ export default function EditorCanvas() {
                 ))}
             </Layer>
 
-            {/* Katman 2: Seçim — Transformer + resize handles */}
-            <SelectionLayer stageRef={stageRef} isDraggingRef={isDraggingRef} />
+            {/* Katman 2: Seçim — Transformer + resize + rotation handles */}
+            <SelectionLayer
+              stageRef={stageRef}
+              isDraggingRef={isDraggingRef}
+            />
 
-            {/* Katman 3: Preview — listening: false */}
+            {/* Katman 3: Preview + Drag Guides — listening: false */}
             <Layer listening={false}>
-              <RowPreview toolState={rowToolState} snapTarget={rowSnapTarget} scale={scale} seatSpacing={seatSpacing} />
+              {/* Row çizim önizlemesi */}
+              <RowPreview
+                toolState={rowToolState}
+                snapTarget={rowSnapTarget}
+                scale={scale}
+                seatSpacing={seatSpacing}
+              />
+
+              {/* Taşıma kılavuz çizgileri — drag sırasında aktif */}
+              <RowDragGuides
+                stageRef={stageRef}
+                isDraggingRef={isDraggingRef}
+                draggingIdsRef={draggingIdsRef}
+              />
             </Layer>
           </Stage>
         </>
       )}
 
-      <CanvasControls stageRef={stageRef} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} />
+      <CanvasControls
+        stageRef={stageRef}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+      />
     </div>
   )
 }

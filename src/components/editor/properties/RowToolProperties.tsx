@@ -7,9 +7,8 @@
 import { useShallow } from 'zustand/react/shallow'
 import { useEditorStore } from '@/store/editor.store'
 import NumberInput from '@/components/ui/NumberInput'
+import PropertyRow from '@/canvas/objects/PropertyRow'
 import { DEFAULT_ROW_SPACING, DEFAULT_SEAT_SPACING } from '@/lib/constants'
-
-
 
 export default function RowToolProperties() {
   const { rowToolSettings, setRowToolSettings } = useEditorStore(
@@ -46,15 +45,6 @@ export default function RowToolProperties() {
           />
         </PropertyRow>
       </div>
-    </div>
-  )
-}
-
-function PropertyRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-2 py-1.5">
-      <span className="text-xs text-[var(--color-text-muted)] shrink-0">{label}</span>
-      {children}
     </div>
   )
 }

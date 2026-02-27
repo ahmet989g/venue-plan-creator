@@ -270,7 +270,7 @@ function makeSeat(rowId: string, index: number): Seat {
     rowId,
     index,
     label: String(index + 1),
-    categoryId: null,
+    categoryIds: [],      // Önceki: categoryId: null
     accessible: false,
     restrictedView: false,
     isAvailable: true,

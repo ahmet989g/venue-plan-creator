@@ -1,15 +1,31 @@
 'use client'
 
-// Row bileşeni — koltuklar x ekseninde dizilir, Group rotation ile döner
-// onMouseDown: select tool'da drag başlatır
-// onClick: seçim — sadece threshold aşılmadıysa tetiklenir (drag ile çakışmaz)
+// Row bileşeni
+//
+// Fragment yapısı — iki ayrı Konva node döner:
+//   1) <Group id={row.id}>  → koltuklar, Transformer bu Group'u hedef alır
+//   2) <RowLabel>           → dünya koordinatlarında sibling, Transformer'ı etkilemez
+//
+// Tangent hesabı:
+//   Curved row'da ilk/son koltuk teğet açısı row.rotation'dan farklıdır.
+//   localTangentFirst = atan2(pos[1].y - pos[0].y, pos[1].x - pos[0].x)
+//   worldRotL         = row.rotation + localTangentFirstDeg
+//   Düz row'da (curve=0): pos tüm y=0 → tangent=0 → worldRot = row.rotation (doğru)
+//
+// Dünya koordinatı dönüşümü:
+//   Group local (lx, ly) → world:
+//     wx = row.x + cos(rowRad)*lx - sin(rowRad)*ly
+//     wy = row.y + sin(rowRad)*lx + cos(rowRad)*ly
 
-import { memo, useCallback, useRef } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { Group } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { useEditorStore } from '@/store/editor.store'
 import SeatShape from './SeatShape'
-import type { Row, Category } from '@/store/types'
+import RowLabel from './RowLabel'
+import { computeCurvedSeatPositions } from '@/lib/geometry'
+import { DEFAULT_SEAT_COLOR, MULTI_CATEGORY_COLOR } from '@/lib/constants'
+import type { Row, Category, Seat, Point } from '@/store/types'
 
 interface RowShapeProps {
   row: Row
@@ -19,17 +35,54 @@ interface RowShapeProps {
   onDragStart: (e: MouseEvent, ids: string[]) => void
 }
 
-function getCategoryColor(categoryId: string | null, categories: Category[]): string {
-  if (!categoryId) return '#4a90d9'
-  return categories.find((c) => c.id === categoryId)?.color ?? '#4a90d9'
+function resolveSeatColor(seat: Seat, categories: Category[]): string {
+  if (seat.categoryIds.length === 0) return DEFAULT_SEAT_COLOR
+  if (seat.categoryIds.length > 1) return MULTI_CATEGORY_COLOR
+  return categories.find((c) => c.id === seat.categoryIds[0])?.color ?? DEFAULT_SEAT_COLOR
+}
+
+// Group yerel koordinatını dünya koordinatına çevirir
+function localToWorld(row: Row, lx: number, ly: number): Point {
+  const rad = row.rotation * (Math.PI / 180)
+  return {
+    x: row.x + Math.cos(rad) * lx - Math.sin(rad) * ly,
+    y: row.y + Math.sin(rad) * lx + Math.cos(rad) * ly,
+  }
 }
 
 function RowShape({ row, categories, onSelect, onDragStart }: RowShapeProps) {
   const selectedSeatIds = useEditorStore((s) => s.selectedSeatIds)
   const selectSeats = useEditorStore((s) => s.selectSeats)
 
-  // Mouse down pozisyonu — click ile drag'i ayırt etmek için
-  const mouseDownPos = useRef({ x: 0, y: 0 })
+  // Koltuk pozisyonları — Group yerel koordinatı
+  const seatPositions = useMemo(
+    () => computeCurvedSeatPositions(row.seats.length, row.seatSpacing, row.curve),
+    [row.seats.length, row.seatSpacing, row.curve],
+  )
+
+  // Dünya koordinatları ve tangent açıları — RowLabel için
+  const labelProps = useMemo(() => {
+    const n = seatPositions.length
+    const pos0 = seatPositions[0] ?? { x: 0, y: 0 }
+    const posN = seatPositions[n - 1] ?? { x: 0, y: 0 }
+    const pos1 = seatPositions[1] ?? posN    // İkinci koltuk (tangent için)
+    const posP = seatPositions[n - 2] ?? pos0 // Sondan ikinci koltuk
+
+    // Yerel teğet açıları (radyan → derece)
+    const localTangentFirstDeg = n > 1
+      ? Math.atan2(pos1.y - pos0.y, pos1.x - pos0.x) * (180 / Math.PI)
+      : 0
+    const localTangentLastDeg = n > 1
+      ? Math.atan2(posN.y - posP.y, posN.x - posP.x) * (180 / Math.PI)
+      : 0
+
+    return {
+      worldFirst: localToWorld(row, pos0.x, pos0.y),
+      worldLast: localToWorld(row, posN.x, posN.y),
+      worldRotL: row.rotation + localTangentFirstDeg,
+      worldRotR: row.rotation + localTangentLastDeg,
+    }
+  }, [row, seatPositions])
 
   const handleSeatSelect = useCallback(
     (seatId: string, multi: boolean) => {
@@ -50,14 +103,9 @@ function RowShape({ row, categories, onSelect, onDragStart }: RowShapeProps) {
     (e: KonvaEventObject<MouseEvent>) => {
       const activeTool = useEditorStore.getState().activeTool
       if (activeTool !== 'select') return
-
       e.cancelBubble = true
-      mouseDownPos.current = { x: e.evt.clientX, y: e.evt.clientY }
-
-      // Seçili row'ları al — bu row seçili değilse sadece bunu taşı
       const currentSelected = useEditorStore.getState().selectedObjectIds
       const idsToMove = currentSelected.includes(row.id) ? currentSelected : [row.id]
-
       onDragStart(e.evt, idsToMove)
     },
     [row.id, onDragStart],
@@ -65,36 +113,52 @@ function RowShape({ row, categories, onSelect, onDragStart }: RowShapeProps) {
 
   const handleClick = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      const activeTool = useEditorStore.getState().activeTool
+      if (activeTool !== 'select') return
       e.cancelBubble = true
-      // useDragMove threshold'u zaten handle ediyor
-      // onClick sadece gerçek tıklamalarda tetiklenir
       onSelect(row.id, e.evt.shiftKey)
     },
     [row.id, onSelect],
   )
 
   return (
-    <Group
-      id={row.id}
-      x={row.x}
-      y={row.y}
-      rotation={row.rotation}
-      visible={row.isVisible}
-      onClick={handleClick}
-      onMouseDown={handleMouseDown}
-    >
-      {row.seats.map((seat, i) => (
-        <SeatShape
-          key={seat.id}
-          seat={seat}
-          x={i * row.seatSpacing}
-          y={0}
-          categoryColor={getCategoryColor(seat.categoryId, categories)}
-          isSelected={selectedSeatIds.includes(seat.id)}
-          onSelect={handleSeatSelect}
-        />
-      ))}
-    </Group>
+    <>
+      {/* ── 1) Koltuk Group — Transformer bu node'u hedef alır ── */}
+      <Group
+        id={row.id}
+        x={row.x}
+        y={row.y}
+        rotation={row.rotation}
+        visible={row.isVisible}
+        onClick={handleClick}
+        onTap={handleClick}
+        onMouseDown={handleMouseDown}
+      >
+        {row.seats.map((seat, i) => {
+          const pos = seatPositions[i] ?? { x: i * row.seatSpacing, y: 0 }
+          return (
+            <SeatShape
+              key={seat.id}
+              seat={seat}
+              x={pos.x}
+              y={pos.y}
+              categoryColor={resolveSeatColor(seat, categories)}
+              isSelected={selectedSeatIds.includes(seat.id)}
+              onSelect={handleSeatSelect}
+            />
+          )
+        })}
+      </Group>
+
+      {/* ── 2) Row Label — sibling, Transformer bounding box'ını etkilemez ── */}
+      <RowLabel
+        row={row}
+        worldFirst={labelProps.worldFirst}
+        worldLast={labelProps.worldLast}
+        worldRotL={labelProps.worldRotL}
+        worldRotR={labelProps.worldRotR}
+      />
+    </>
   )
 }
 
