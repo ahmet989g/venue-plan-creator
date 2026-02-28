@@ -2,10 +2,12 @@
 
 // Select Tool — row ve obje seçim yönetimi
 // Transformer için seçili node'ların ref'lerini tutar
-// Shift+click: çoklu seçim, boş canvas: seçimi temizle
+// Shift+click: çoklu seçim
+// Boş canvas click (shift yok): seçimi temizle
+// Boş canvas click (shift var): seçimi koru — additive marquee akışını bozmaz
 // Handle drag sırasında stage click'in seçimi temizlemesi engellenir
 
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
@@ -17,22 +19,24 @@ export const setResizeDragging = (v: boolean) => { _isResizeDragging = v }
 export const isResizeDragging  = ()            => _isResizeDragging
 
 export function useSelectTool(stageRef: React.RefObject<Konva.Stage | null>) {
-  const { activeTool, selectedObjectIds, selectObjects, clearSelection } = useEditorStore(
+  const { activeTool, selectObjects, clearSelection } = useEditorStore(
     useShallow((s) => ({
-      activeTool:        s.activeTool,
-      selectedObjectIds: s.selectedObjectIds,
-      selectObjects:     s.selectObjects,
-      clearSelection:    s.clearSelection,
+      activeTool:    s.activeTool,
+      selectObjects: s.selectObjects,
+      clearSelection: s.clearSelection,
     })),
   )
 
   const isActive = activeTool === 'select'
 
   // Canvas boş alanına tıklayınca seçimi temizle
+  // Shift basılıysa temizleme — additive marquee sonrası click seçimi silmesin
   const handleStageClick = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
       if (!isActive) return
-      if (_isResizeDragging) return          // Handle drag bitti, seçimi korut
+      if (_isResizeDragging) return   // Marquee veya handle drag bitti — seçimi koru
+      if (e.evt.shiftKey) return      // Shift basılıysa boş tıklama seçimi silmez
+      if (e.evt.ctrlKey || e.evt.metaKey) return  // Ctrl basılıysa da silme
       const stage = stageRef.current
       if (!stage || e.target !== stage) return
       clearSelection()
@@ -56,5 +60,5 @@ export function useSelectTool(stageRef: React.RefObject<Konva.Stage | null>) {
     [selectObjects],
   )
 
-  return { isActive, selectedObjectIds, handleStageClick, handleObjectSelect }
+  return { isActive, handleStageClick, handleObjectSelect }
 }

@@ -23,6 +23,8 @@ import RowPreview from '@/canvas/objects/RowPreview'
 import RowDragGuides from '@/canvas/objects/RowDragGuides'
 import CanvasControls from './CanvasControls'
 import type { Row } from '@/store/types'
+import { useMarqueeSelect } from '@/hooks/useMarqueeSelect'
+import MarqueeRect from '@/canvas/shared/MarqueeRect'
 
 export default function EditorCanvas() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -66,6 +68,8 @@ export default function EditorCanvas() {
     handleStageClick: handleSelectStageClick,
     handleObjectSelect,
   } = useSelectTool(stageRef)
+
+  const { marqueeRect, dragMode, handleMarqueeMouseDown } = useMarqueeSelect(stageRef)
 
   // draggingIdsRef — RowDragGuides'a aktarılır
   const { startDrag, isDraggingRef, draggingIdsRef } = useDragMove({ stageRef })
@@ -153,14 +157,18 @@ export default function EditorCanvas() {
 
   const handleMouseDown = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
-      if (activeTool !== 'hand') return
-      const stage = stageRef.current
-      if (!stage || e.target !== stage) return
-      isPanningRef.current = true
-      setIsPanning(true)
-      stage.startDrag()
+      if (activeTool === 'hand') {
+        const stage = stageRef.current
+        if (!stage || e.target !== stage) return
+        isPanningRef.current = true
+        setIsPanning(true)
+        stage.startDrag()
+        return
+      }
+      // Select tool: boş canvas → marquee başlat
+      handleMarqueeMouseDown(e)
     },
-    [activeTool],
+    [activeTool, handleMarqueeMouseDown],
   )
 
   const handleMouseUp = useCallback(() => {
@@ -191,7 +199,8 @@ export default function EditorCanvas() {
   const cursor =
     activeTool === 'row' ? 'crosshair' :
       activeTool === 'hand' ? (isPanning ? 'grabbing' : 'grab') :
-        'default'
+        (activeTool === 'select' && marqueeRect) ? 'crosshair' :
+          'default'
 
   return (
     <div
@@ -258,6 +267,8 @@ export default function EditorCanvas() {
                 isDraggingRef={isDraggingRef}
                 draggingIdsRef={draggingIdsRef}
               />
+              {/* Marquee seçim dikdörtgeni */}
+              {marqueeRect && <MarqueeRect rect={marqueeRect} dragMode={dragMode} />}
             </Layer>
           </Stage>
         </>
