@@ -7,6 +7,7 @@
 // - Guide lines SectionDragGuides bileşeni ile yönetilir
 
 import { memo, useCallback } from 'react'
+import type Konva from 'konva'
 import { Layer, Rect } from 'react-konva'
 import { useShallow } from 'zustand/react/shallow'
 import { useEditorStore } from '@/store/editor.store'
@@ -23,7 +24,7 @@ function SectionLayer({
   isDark = false,
   scale = 1,
 }: {
-  stageRef: React.RefObject<import('konva').Stage | null>
+  stageRef: React.RefObject<Konva.Stage | null>
   isDark?: boolean
   scale?: number
 }) {
