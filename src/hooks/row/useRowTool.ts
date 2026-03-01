@@ -11,13 +11,13 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import { useShallow } from 'zustand/react/shallow'
 import { useEditorStore } from '@/store/editor.store'
 import { screenToCanvas } from '@/lib/geometry'
-import { useSnapping } from '@/hooks/useSnapping'
+import { useSnapping } from '@/hooks/canvas/useSnapping'
 import {
   initialRowToolState,
   handleRowToolClick,
   handleRowToolMouseMove,
   type RowToolState,
-} from '@/canvas/tools/RowTool'
+} from '@/canvas/tools/row/RowTool'
 import type { SnapPoint } from '@/lib/snapPoints'
 
 export interface RowToolHookResult {

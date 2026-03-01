@@ -1,6 +1,14 @@
 'use client'
 
-// Dikey araç çubuğu — venue tipine göre filtrelenmiş tool listesi
+// Dikey araç çubuğu — venue tipine ve editing context'e göre filtrelenmiş tool listesi
+//
+// Normal mod (large-theatre):
+//   Section tool görünür, Row/Table/Booth gizli
+//
+// Editing context modu (section içi):
+//   Section tool gizlenir
+//   Row/Table/Booth araçları ZORLA gösterilir — section içine nesne eklenebilir
+//
 // Hand Tool her zaman en altta separator ile ayrılır
 
 import { useMemo } from 'react'
@@ -10,11 +18,19 @@ import { TOOLBAR_TOOLS } from './toolbar/constants'
 import ToolItem from './toolbar/ToolItem'
 import type { VenueType } from '@/store/types'
 
-// Venue tipine göre tool görünürlüğünü kontrol et
 function isToolVisible(
   tool: typeof TOOLBAR_TOOLS[number],
   venueType: VenueType | null,
+  isEditingSection: boolean,
 ): boolean {
+  // Editing context aktifken — section tool gizle, row/table/booth göster
+  if (isEditingSection) {
+    // Section tool editing modda anlamsız — gizle
+    if (tool.id === 'section') return false
+    // Normalde large-theatre'de gizlenen araçları zorla göster
+    if (tool.hiddenFor?.includes('large-theatre')) return true
+  }
+
   if (!venueType) return true
   if (tool.visibleFor && !tool.visibleFor.includes(venueType)) return false
   if (tool.hiddenFor && tool.hiddenFor.includes(venueType)) return false
@@ -22,22 +38,24 @@ function isToolVisible(
 }
 
 export default function Toolbar() {
-  const { activeTool, venueType } = useEditorStore(
+  const { activeTool, venueType, isEditingSection } = useEditorStore(
     useShallow((s) => ({
       activeTool: s.activeTool,
       venueType: s.chart?.venueType ?? null,
+      isEditingSection: s.editingContext?.type === 'section',
     })),
   )
 
   const { mainTools, bottomTool } = useMemo(() => {
-    const visible = TOOLBAR_TOOLS.filter((t) => isToolVisible(t, venueType))
+    const visible = TOOLBAR_TOOLS.filter((t) =>
+      isToolVisible(t, venueType, isEditingSection),
+    )
     return {
       mainTools: visible.filter((t) => !t.isBottom),
       bottomTool: visible.find((t) => t.isBottom) ?? null,
     }
-  }, [venueType])
+  }, [venueType, isEditingSection])
 
-  // Aktif tool'un parent tool'una göre active state belirle
   const isToolActive = (tool: typeof TOOLBAR_TOOLS[number]) => {
     if (tool.id === activeTool) return true
     return tool.dropdown?.some((d) => d.id === activeTool) ?? false

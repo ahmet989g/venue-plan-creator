@@ -272,22 +272,44 @@ export type ChartObject =
 
 // --- Section ---
 
+// Polygon section'da her kenar (edge) için bezier kontrol noktası
+// points[i] → points[(i+1) % n] kenarını tanımlar
+// isCurved=false → lineTo (düz kenar)
+// isCurved=true  → quadraticCurveTo(cpx, cpy, nextX, nextY)
+export interface SectionEdge {
+  isCurved: boolean
+  cpx:      number   // Quadratic bezier kontrol noktası X
+  cpy:      number   // Quadratic bezier kontrol noktası Y
+}
+
 export interface Section {
   id:        string
   floorId:   string
-  label:     string
-  color:     string
+  label:     string           // Label metni — properties'ten yazılır, default boş
+  color:     string           // Stroke + fill rengi
   shape:     'rect' | 'polygon'
+  // Dikdörtgen section için
   x?:        number
   y?:        number
   width?:    number
   height?:   number
-  points?:   Point[]
+  // Polygon section için
+  points?:   Point[]          // Dünya koordinatlarında köşe noktaları
+  edges?:    SectionEdge[]    // points ile aynı uzunluk — her kenar için bezier verisi
+  // Curve edit modu — Properties'ten toggle edilir
+  curveEditMode?: boolean
+  // Label görsel özellikleri
+  // Renk hem label hem section border'ı etkiler
+  labelFontSize?:   number    // pt, default 14
+  labelRotation?:   number    // derece, default 0
+  labelVisible?:    boolean   // default true
+  labelX?:          number    // override — önceden tanımlı, kalıyor
+  labelY?:          number    // override — önceden tanımlı, kalıyor
   isVisible: boolean
   isLocked:  boolean
   zoomable:  boolean
   order:     number
-  objectIds: string[]
+  objectIds: string[]         // Bu section'a ait nesne ID'leri
 }
 
 // --- Floor ---

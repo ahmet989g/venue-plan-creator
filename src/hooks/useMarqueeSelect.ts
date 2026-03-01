@@ -23,7 +23,7 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import { useEditorStore } from '@/store/editor.store'
 import { computeCurvedSeatPositions } from '@/lib/geometry'
 import { SEAT_RADIUS } from '@/lib/constants'
-import { setResizeDragging } from '@/hooks/useSelectTool'
+import { setResizeDragging } from '@/hooks/canvas/useSelectTool'
 import type { Row, Point } from '@/store/types'
 
 // Sürükleme için minimum piksel eşiği — yanlışlıkla marquee başlamasın

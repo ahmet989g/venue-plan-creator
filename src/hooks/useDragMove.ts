@@ -15,7 +15,7 @@
 import { useRef, useEffect, useCallback } from 'react'
 import type Konva from 'konva'
 import { useEditorStore } from '@/store/editor.store'
-import { setResizeDragging } from '@/hooks/useSelectTool'
+import { setResizeDragging } from '@/hooks/canvas/useSelectTool'
 import type { ChartObject } from '@/store/types'
 
 export interface DragMoveOptions {

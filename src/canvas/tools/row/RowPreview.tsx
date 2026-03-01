@@ -12,7 +12,7 @@ import { calcSeatPositions, angle, distance } from '@/lib/geometry'
 import { SEAT_RADIUS } from '@/lib/constants'
 import GuideLines from '@/canvas/shared/GuideLines'
 import SnapIndicator from '@/canvas/shared/SnapIndicator'
-import type { RowToolState } from '@/canvas/tools/RowTool'
+import type { RowToolState } from '@/canvas/tools/row/RowTool'
 import type { SnapPoint } from '@/lib/snapPoints'
 
 const GUIDE_DEFAULT = 'rgba(0,200,255,0.35)'

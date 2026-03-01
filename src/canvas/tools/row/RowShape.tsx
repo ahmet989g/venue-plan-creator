@@ -3,8 +3,10 @@
 // Row bileşeni
 //
 // Fragment yapısı — iki ayrı Konva node döner:
-//   1) <Group id={row.id}>  → koltuklar, Transformer bu Group'u hedef alır
-//   2) <RowLabel>           → dünya koordinatlarında sibling, Transformer'ı etkilemez
+//   1) <Group id={row.id}
+// listening = { listening }
+// opacity = { opacity } >    → koltuklar, Transformer bu Group'u hedef alır
+//   2) <RowLabel>            → dünya koordinatlarında sibling, Transformer'ı etkilemez
 //
 // Tangent hesabı:
 //   Curved row'da ilk/son koltuk teğet açısı row.rotation'dan farklıdır.
@@ -21,8 +23,8 @@ import { memo, useCallback, useMemo } from 'react'
 import { Group } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { useEditorStore } from '@/store/editor.store'
-import SeatShape from './SeatShape'
-import RowLabel from './RowLabel'
+import SeatShape from '@/canvas/tools/row/SeatShape'
+import RowLabel from '@/canvas/tools/row/RowLabel'
 import { computeCurvedSeatPositions } from '@/lib/geometry'
 import { DEFAULT_SEAT_COLOR, MULTI_CATEGORY_COLOR } from '@/lib/constants'
 import type { Row, Category, Seat, Point } from '@/store/types'
@@ -31,8 +33,10 @@ interface RowShapeProps {
   row: Row
   categories: Category[]
   isSelected: boolean
+  listening?: boolean                                    // false → blok modu, event almaz
+  opacity?: number                                     // section blok modunda 0.55
   onSelect: (rowId: string, multi: boolean) => void
-  onDragStart: (e: MouseEvent, ids: string[]) => void
+  onDragStart?: (e: MouseEvent, ids: string[]) => void   // blok modda undefined
 }
 
 function resolveSeatColor(seat: Seat, categories: Category[]): string {
@@ -50,25 +54,29 @@ function localToWorld(row: Row, lx: number, ly: number): Point {
   }
 }
 
-function RowShape({ row, categories, onSelect, onDragStart }: RowShapeProps) {
+function RowShape({
+  row,
+  categories,
+  listening = true,
+  opacity = 1,
+  onSelect,
+  onDragStart,
+}: RowShapeProps) {
   const selectedSeatIds = useEditorStore((s) => s.selectedSeatIds)
   const selectSeats = useEditorStore((s) => s.selectSeats)
 
-  // Koltuk pozisyonları — Group yerel koordinatı
   const seatPositions = useMemo(
     () => computeCurvedSeatPositions(row.seats.length, row.seatSpacing, row.curve),
     [row.seats.length, row.seatSpacing, row.curve],
   )
 
-  // Dünya koordinatları ve tangent açıları — RowLabel için
   const labelProps = useMemo(() => {
     const n = seatPositions.length
     const pos0 = seatPositions[0] ?? { x: 0, y: 0 }
     const posN = seatPositions[n - 1] ?? { x: 0, y: 0 }
-    const pos1 = seatPositions[1] ?? posN    // İkinci koltuk (tangent için)
-    const posP = seatPositions[n - 2] ?? pos0 // Sondan ikinci koltuk
+    const pos1 = seatPositions[1] ?? posN
+    const posP = seatPositions[n - 2] ?? pos0
 
-    // Yerel teğet açıları (radyan → derece)
     const localTangentFirstDeg = n > 1
       ? Math.atan2(pos1.y - pos0.y, pos1.x - pos0.x) * (180 / Math.PI)
       : 0
@@ -103,6 +111,8 @@ function RowShape({ row, categories, onSelect, onDragStart }: RowShapeProps) {
     (e: KonvaEventObject<MouseEvent>) => {
       const activeTool = useEditorStore.getState().activeTool
       if (activeTool !== 'select') return
+      // Blok modda onDragStart undefined — drag engellenir
+      if (!onDragStart) return
       e.cancelBubble = true
       const currentSelected = useEditorStore.getState().selectedObjectIds
       const idsToMove = currentSelected.includes(row.id) ? currentSelected : [row.id]

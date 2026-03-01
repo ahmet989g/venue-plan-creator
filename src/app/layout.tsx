@@ -22,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="tr" data-theme="dark" className={roboto.variable} suppressHydrationWarning>
+    <html lang="en" data-theme="dark" className={roboto.variable} suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="data-theme" defaultTheme="dark" disableTransitionOnChange>
           {children}
