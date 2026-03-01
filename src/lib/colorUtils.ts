@@ -66,9 +66,9 @@ export function darkenColor(hex: string, amount = 0.25): string {
     ? clean.split('').map((c) => c + c).join('')
     : clean
 
-  let r = parseInt(full.substring(0, 2), 16) / 255
-  let g = parseInt(full.substring(2, 4), 16) / 255
-  let b = parseInt(full.substring(4, 6), 16) / 255
+  const r = parseInt(full.substring(0, 2), 16) / 255
+  const g = parseInt(full.substring(2, 4), 16) / 255
+  const b = parseInt(full.substring(4, 6), 16) / 255
 
   const max = Math.max(r, g, b)
   const min = Math.min(r, g, b)

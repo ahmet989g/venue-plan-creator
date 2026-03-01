@@ -4,9 +4,9 @@
 //
 // Fragment yapısı — iki ayrı Konva node döner:
 //   1) <Group id={row.id}
-// listening = { listening }
-// opacity = { opacity } >    → koltuklar, Transformer bu Group'u hedef alır
-//   2) <RowLabel>            → dünya koordinatlarında sibling, Transformer'ı etkilemez
+//listening = { listening }
+//opacity = { opacity } >  → koltuklar, Transformer bu Group'u hedef alır
+//   2) <RowLabel>           → dünya koordinatlarında sibling, Transformer'ı etkilemez
 //
 // Tangent hesabı:
 //   Curved row'da ilk/son koltuk teğet açısı row.rotation'dan farklıdır.
@@ -131,6 +131,17 @@ function RowShape({
     [row.id, onSelect],
   )
 
+  // onTap — TouchEvent kullanır, MouseEvent ile aynı mantık ama ayrı tip
+  const handleTap = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      const activeTool = useEditorStore.getState().activeTool
+      if (activeTool !== 'select') return
+      e.cancelBubble = true
+      onSelect(row.id, false)
+    },
+    [row.id, onSelect],
+  )
+
   return (
     <>
       {/* ── 1) Koltuk Group — Transformer bu node'u hedef alır ── */}
@@ -141,7 +152,7 @@ function RowShape({
         rotation={row.rotation}
         visible={row.isVisible}
         onClick={handleClick}
-        onTap={handleClick}
+        onTap={handleTap}
         onMouseDown={handleMouseDown}
       >
         {row.seats.map((seat, i) => {

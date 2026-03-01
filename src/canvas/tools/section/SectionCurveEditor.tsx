@@ -15,6 +15,7 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import { useEditorStore } from '@/store/editor.store'
 import { useShallow } from 'zustand/react/shallow'
 import type { Section, SectionEdge } from '@/store/types'
+import type Konva from 'konva'
 
 // ─── Sabitler ────────────────────────────────────────────────────────────────
 
@@ -125,14 +126,14 @@ function SectionCurveEditorInner({ section, scale }: SectionCurveEditorProps) {
               onDragMove={handleDragMove}
               onDblClick={handleDblClick}
               onMouseEnter={(e) => {
-                const node = e.target
+                const node = e.target as Konva.Circle
                 node.fill(ANCHOR_HOVER_FILL)
                 node.getLayer()?.batchDraw()
                 const container = node.getStage()?.container()
                 if (container) container.style.cursor = 'crosshair'
               }}
               onMouseLeave={(e) => {
-                const node = e.target
+                const node = e.target as Konva.Circle
                 node.fill(isCurved ? CURVED_MARKER_FILL : STRAIGHT_MARKER_FILL)
                 node.getLayer()?.batchDraw()
                 const container = node.getStage()?.container()

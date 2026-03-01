@@ -24,6 +24,20 @@ interface SectionRowStripeProps {
 }
 
 function SectionRowStripe({ row, isDark }: SectionRowStripeProps) {
+  // Hook'lar early return'den ÖNCE — React kuralı
+  const positions = useMemo(
+    () => row.curve !== 0
+      ? computeCurvedSeatPositions(row.seats.length, row.seatSpacing, row.curve)
+      : [],
+    [row.seats.length, row.seatSpacing, row.curve],
+  )
+
+  const flatPoints = useMemo(
+    () => positions.flatMap((p) => [p.x, p.y]),
+    [positions],
+  )
+
+  // Early return'ler hook'lardan SONRA
   if (!row.isVisible) return null
   if (row.seats.length === 0) return null
 
@@ -31,7 +45,7 @@ function SectionRowStripe({ row, isDark }: SectionRowStripeProps) {
     ? 'rgba(200, 210, 220, 0.50)'
     : 'rgba(40, 50, 60, 0.35)'
 
-  // ─── Düz row — tek çizgi, daha performanslı ───────────────────────────────
+  // ─── Düz row — tek çizgi ──────────────────────────────────────────────────
 
   if (row.curve === 0) {
     const lastX = (row.seats.length - 1) * row.seatSpacing
@@ -54,19 +68,7 @@ function SectionRowStripe({ row, isDark }: SectionRowStripeProps) {
     )
   }
 
-  // ─── Curved row — tüm koltuk pozisyonlarından geçen polyline ─────────────
-
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const positions = useMemo(
-    () => computeCurvedSeatPositions(row.seats.length, row.seatSpacing, row.curve),
-    [row.seats.length, row.seatSpacing, row.curve],
-  )
-
-  // Flat points dizisi: [x0,y0, x1,y1, ...]
-  const flatPoints = useMemo(
-    () => positions.flatMap((p) => [p.x, p.y]),
-    [positions],
-  )
+  // ─── Curved row ───────────────────────────────────────────────────────────
 
   return (
     <Group

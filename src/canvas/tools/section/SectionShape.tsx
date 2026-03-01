@@ -84,7 +84,9 @@ function SectionShape({
     const selfRect = () => ({ x: bbox.x, y: bbox.y, width: bbox.w, height: bbox.h })
     // Group override — Transformer Group'a bağlandığı için burası kritik
     if (groupRef.current) {
-      groupRef.current.getSelfRect = selfRect
+      // Konva Group type'ında getSelfRect tanımlı değil ama runtime'da override edilebilir
+      // Transformer bu metodu çağırarak bbox hesaplar — cast ile tip hatasını aşıyoruz
+      ; (groupRef.current as unknown as { getSelfRect: () => object }).getSelfRect = selfRect
     }
     // Shape override — Group.getClientRect() children'dan hesaplarken kullanır
     if (shapeRef.current) {
@@ -118,6 +120,14 @@ function SectionShape({
 
   const handleClick = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      e.cancelBubble = true
+      onSelect(section.id)
+    },
+    [section.id, onSelect],
+  )
+
+  const handleTap = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
       e.cancelBubble = true
       onSelect(section.id)
     },
@@ -180,7 +190,7 @@ function SectionShape({
           onMouseDown={handleMouseDown}
           onClick={handleClick}
           onDblClick={handleDblClick}
-          onTap={handleClick}
+          onTap={handleTap}
           perfectDrawEnabled={false}
         />
       )}
@@ -198,7 +208,7 @@ function SectionShape({
           onMouseDown={handleMouseDown}
           onClick={handleClick}
           onDblClick={handleDblClick}
-          onTap={handleClick}
+          onTap={handleTap}
           perfectDrawEnabled={false}
         />
       )}
